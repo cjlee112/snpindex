@@ -13,6 +13,13 @@ cdef extern from "stdlib.h":
              int (*compar)(void *,void *))
 
 
+
+cdef extern from "math.h":
+    double c_log "log" (double)
+    double c_exp "exp" (double)
+    double c_sqrt "sqrt" (double)
+
+
 cdef extern from "cgraph.h":
     ctypedef struct CDictEntry:
         int k
