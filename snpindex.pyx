@@ -129,8 +129,121 @@ cdef CDict *cdict_from_dict(object d):
 
 
 
+        
+
+
+
+
+cdef class PairAnalysis:
+    'performs pairwise analysis of SNPs to find associations'
+    cdef SNPDataset dataset
+    cdef int nsnp
+
+    def __new__(self,SNPDataset dataset):
+        self.dataset=dataset
+        self.nsnp=dataset.nsnp
+        #self.analyze(icap,ratio_min)
+
+    def analyze(self,float f=2.0,int Nij_min=2):
+        '''perform pairwise analysis over all mutations.
+        Return tuples (Zscore,i,j,Nij,Nj-Nij,Nij0,Nj0-Nij0) that meet
+        the criterion p(i|j)=Nij/Nj more than f std devs above
+        p(i|j0)=Nij0/Nj0, using sample std dev given by 1/sqrt(N)
+        for sample size N (i.e. Nj for p(i|j), and Nj0 for p(i|j0)).
+        The tuples are sorted in descending order of Zscore.
+        Arguments:
+          f: detection threshold, in #std deviations (default value 2).
+          Nij_min: minimum count required for any pair ij to be reported
+                   (default value 2).'''
+        cdef int i,j,k,l,s,isnp,n
+        cdef CDictEntry *dd
+        cdef CGraphEntry *gd
+        cdef float g,*sigma,sigmaJ0
+        cdef float Nij0,Nj0,Pij0
+        cdef int *count,*N0
+        f=f/2. # TWO STD DEV --> f=1
+        gd=self.dataset.snp[0].dict
+        count=<int *>calloc(self.nsnp*self.nsnp,sizeof(int))
+        if count==NULL:
+            raise MemoryError
+        sigma=<float *>calloc(self.nsnp,sizeof(float))
+        if sigma==NULL:
+            raise MemoryError
+        N0=<int *>calloc(self.dataset.npos,sizeof(float))
+        if N0==NULL:
+            raise MemoryError
+        i=self.dataset.nsnp - 1
+        n=0
+        while i>=0: # COUNT #WT OBS FOR EACH CODON
+            if gd[i].v: #  A REGULAR MUTATION: SUM COUNTS FOR THIS POS
+                n=n+gd[i].v[0].n
+            else: # END OF MUTATIONS FOR THIS POS: SAVE TOTAL COUNT
+                j=gd[i].k/1344
+                N0[j]=self.dataset.nsample - n # #UNMUTATED OBS
+                n=0
+            i=i-1
+        for i from 0 <= i < self.nsnp: # COMPUTE SAMPLE STD DEV
+            if gd[i].v:
+                sigma[i]=f/c_sqrt(gd[i].v[0].n)
+        for s from 0 <= s < self.dataset.max_sample:
+            dd=self.dataset.sample[s].dict
+            for i from 0 <= i < self.dataset.sample[s].n:
+                isnp=dd[i].k
+                l=isnp*self.nsnp
+                for j from 0 <= j < self.dataset.sample[s].n:
+                    k=dd[j].k
+                    count[l+k] = count[l+k] +1
+        # NOW COMPUTE SIGNIFICANCE OF (Nij/Nj) vs. (Nij0/Nj0)
+        # Nij: count[i*self.nsnp+j]
+        # Nj: gd[j].v[0].n
+        # Nij0: gd[i].v[0].n - SUM(count[i*self.nsnp+k] for k in same pos as j)
+        # Nj0: N0[gd[j].k/1344]
+        pairList=[]
+        for i from 0 <= i < self.nsnp: # FIND LINKED i,j PAIRS
+            if gd[i].v==NULL: # WT CODON, NOT MUTATION, SO SKIP
+                continue
+            l=i*self.nsnp
+            for j from 0 <= j < self.nsnp:
+                if gd[j].v==NULL: # WT CODON: START OF MUTS AT THIS POS
+                    Nj0=N0[gd[j].k/1344] # COUNT OF WT CODON OBS AT THIS POSITION
+                    k=j+1
+                    Nij0=gd[i].v[0].n # #TOTAL OBS OF MUTATION i
+                    while gd[k].v: # SUBTRACT OBS OF i WITH MUTATIONS AT j POS
+                        Nij0=Nij0-count[l+k]
+                        k=k+1
+                    sigmaJ0=f/c_sqrt(Nj0)
+                    Pij0=Nij0/Nj0 + sigmaJ0 # ADJUST UPWARDS BY SAMPLE DEV
+                elif i!=j and count[l+j]>=Nij_min:
+                    g=count[l+j]/<float>gd[j].v[0].n - sigma[j] # ADJUST BY SAMPLE DEV
+                    if g>Pij0: # OVER THRESHOLD, SAVE AS GOOD CANDIDATE
+                        pairList.append(((g-Pij0+sigma[j]+sigmaJ0)
+                                         *2.*f/(sigma[j]+sigmaJ0),
+                                         i,j,count[l+j],gd[j].v[0].n-count[l+j],
+                                         Nij0,Nj0-Nij0))
+
+        free(sigma) # DUMP TEMPORARY ARRAYS
+        free(count)
+        free(N0)
+        pairList.sort() # SORT BY Z SCORE, HIGHEST VALUES FIRST
+        pairList.reverse()
+        return pairList
+                                                                
+
+    def __dealloc__(self):
+        pass
+
+
+
+
+
 
 cdef class IntSet:
+    '''dict interface to a set of SNPs or samples coded as integer IDs.
+    In addition to the standard dict methods, it also implements set
+    operations:
+      A*B (intersection of A and B; *= also implemented)
+      A+B (union of A and B; += also implemented)
+      A-B (subtraction: subset of A not in B; -= also implemented)'''
     def __new__(self,SNPDataset dataset=None,int isnp= -1,int isample= -1,
                 int nalloc=0,iterable=None):
         self.dataset=dataset
@@ -315,8 +428,9 @@ cdef class IntSet:
 
 
 cdef class SNPDataset:
+    '''dict interface to a set of SNPs observed in a set of samples'''
     property samples:
-        'interface to individual samples in this dataset'
+        'dict interface to individual samples in this dataset'
         def __get__(self):
             return SNPSamples(self)
 
