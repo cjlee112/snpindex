@@ -398,7 +398,7 @@ cdef class IntSet:
         d=cdict_alloc(self.d[0].n+o.d[0].n)
         k=union(self.d[0].n,self.d[0].dict,n2,dd2,d[0].dict) # GET UNION
         if self.d_free: # DUMP OLD MEMORY IF NEEDED
-            free(self.d_free)
+            cdict_free(self.d_free)
         self.d=d # ATTACH NEW CDICT TO THIS OBJECT
         self.d_free=d # DYNAMICALLY ALLOCATED, SO FREE LATER ON...
         self.resize(k) # SHORTEN THE LIST IF NEEDED
@@ -421,7 +421,7 @@ cdef class IntSet:
 
     def __dealloc__(self):
         if self.d_free:
-            free(self.d_free)
+            cdict_free(self.d_free)
     
 
 
