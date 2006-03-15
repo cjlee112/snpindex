@@ -254,7 +254,7 @@ cdef class IntSet:
             if self.d==NULL:
                 raise KeyError('wt codon has no sample list')
         elif dataset is not None and isample>=0:
-            if isample>=dataset.nsample:
+            if isample>=dataset.max_sample:
                 raise IndexError('overflow')
             self.d=dataset.sample+isample
         elif nalloc>0:
@@ -418,7 +418,15 @@ cdef class IntSet:
         n=difference(self.d[0].n,self.d[0].dict,other,self.d[0].dict)
         self.resize(n)
         return self # isub MUST RETURN self!
-
+    def ndiff(self,IntSet other):
+        '#distinct differences between self and other'
+        cdef int i,n
+        n=0
+        for i from 0 <= i < self.d[0].n:
+            if cdict_getitem(other.d,self.d[0].dict[i].k):
+                n=n+1
+        return self.d[0].n+other.d[0].n - 2*n
+        
     def __dealloc__(self):
         if self.d_free:
             cdict_free(self.d_free)
