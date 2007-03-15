@@ -556,6 +556,38 @@ cdef class SNPDataset:
         else:
             return ipos,aa,codon,aa_wt,codon_wt
 
+    def similarSamples(self,int maxdiff,int mindiff=0):
+        'return a list of sample pairs with mindiff <= d <= maxdiff differences'
+        cdef int s1,s2,i,j,k,n1,n2
+        cdef CDictEntry *dd1,*dd2
+        l=[]
+        for s1 from 0 <= s1 < self.max_sample:
+            n1=self.sample[s1].n
+            if n1>0:
+##                 if s1%100==0:
+##                     print s1
+                dd1=self.sample[s1].dict
+                for s2 from s1+1 <= s2 < self.max_sample:
+                    n2=self.sample[s2].n
+                    if n2>0:
+                        dd2=self.sample[s2].dict
+                        i=0
+                        j=0
+                        k=0
+                        while i<n1 and j<n2:
+                            if dd1[i].k<dd2[j].k:
+                                i=i+1
+                            elif dd1[i].k==dd2[j].k:
+                                i=i+1
+                                j=j+1
+                                k=k+1
+                            else:
+                                j=j+1
+                        k=n1+n2-2*k
+                        if mindiff<=k and k<=maxdiff:
+                            l.append((s1,s2))
+        return l
+
         
 
     def readSortedSNPs(self,infile,int nsample,int maxsnp):
