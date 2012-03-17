@@ -191,8 +191,9 @@ cdef class PairAnalysis:
                 isnp=dd[i].k
                 l=isnp*self.nsnp
                 for j from 0 <= j < self.dataset.sample[s].n:
-                    k=dd[j].k
-                    count[l+k] = count[l+k] +1
+                    if i != j:
+                        k=dd[j].k
+                        count[l+k] = count[l+k] +1
         # NOW COMPUTE SIGNIFICANCE OF (Nij/Nj) vs. (Nij0/Nj0)
         # Nij: count[i*self.nsnp+j]
         # Nj: gd[j].v[0].n
@@ -592,11 +593,11 @@ cdef class SNPDataset:
 
     def readSortedSNPs(self,infile,int nsample,int maxsnp):
         '''read data, one SNP per line in tab-separated format
-        (isample, ipos, codon_snp_pos, wt_codon, wt_aa, codon, aa)
+        (ipos, codon, aa, wt_codon, wt_aa, isample)
         The input file should be sorted so all observations of a given
         SNP (i.e. a specific codon at a specific ipos) are grouped
         together.  This can be achieved via the UNIX command
-        sort +1 <infile >outfile
+        sort <infile >outfile
 
         Arguments:
         - nsample: should be larger than the largest isample value
@@ -604,7 +605,7 @@ cdef class SNPDataset:
           codon variants at all positions (including the wildtype
           codon).  E.g. allowing for 9 possible SNPs at each codon,
           plus the wildtype codon, for 100 codons use a maxsnp=1000'''
-        cdef int i,j,snp_code,*tmp_sample,n,ntotal,nsnp,npos,*nmut,nsnp_pos
+        cdef int i,j,snp_code,*tmp_sample,n,ntotal,nsnp,npos,*nmut,nsnp_pos,lastsample
         cdef int *codon_wt,isample
         cdef CDict *d
         cdef CDictEntry *dd
@@ -613,7 +614,7 @@ cdef class SNPDataset:
         codon_wt=<int *>calloc(maxsnp,sizeof(int))
         if tmp_sample==NULL or nmut==NULL or codon_wt==NULL:
             raise MemoryError
-        nsnp= -1
+        nsnp= 0
         imax=0
         npos=0
         lastpos= -1
@@ -621,31 +622,38 @@ cdef class SNPDataset:
         n=0
         ntotal=0
         nsnp_pos=0
+        lastsample = -1
         for line in infile:
             l=line.split()
-            isample,ipos,codon0,aa0,codon,aa= (int(l[0]),int(l[1]),l[3],l[4],l[5],l[6])
+            ipos,codon,aa,codon0,aa0,isample= (int(l[0]),l[1],l[2],l[3],l[4],int(l[5]))
+            if codon == codon0: # ignore wildtype codons
+                continue
             if ipos!=lastpos or codon!=lastcodon:
+                lastsample = -1
                 if n>0: # SAVE LAST SNP LIST
                     self.save_snp_dict(nsnp,snp_code,n,tmp_sample,maxsnp)
+                    nsnp=nsnp+1 # ADVANCE TO NEXT SNP SLOT
                 if ipos!=lastpos: # NEW POSITION
                     if ipos>=maxsnp: # CHECK FOR OVERFLOW
                         raise IndexError('overflow! please increase nsnp')
                     if lastpos>=0: # SAVE COUNT OF "MUTATIONS" AT LAST POSITION
                         nmut[lastpos]=nsnp_pos
                     codon_wt[ipos]=encode_codon(0,codon0,aa0) # SAVE NEW WT CODON
-                    nsnp=nsnp+1 # ADVANCE TO NEXT SNP SLOT
                     self.save_snp_dict(nsnp,1344*ipos,0,NULL,maxsnp) # SAVE WT CODON
+                    nsnp=nsnp+1 # ADVANCE TO NEXT SNP SLOT
                     nsnp_pos=0 # RESET COUNTERS FOR THIS POSITION
                     lastpos=ipos
                 snp_code=encode_codon(ipos,codon,aa)
                 if ipos>=npos:
                     npos=ipos+1
                 lastcodon=codon
-                nsnp = nsnp + 1
                 n=0
+            if isample == lastsample:
+                continue # ignore duplicate samples
             if n>=nsample:
                 raise IndexError('overflow! please increase nsample')
             tmp_sample[n]=isample
+            lastsample = isample
             n= n+1
             ntotal = ntotal + 1
             nsnp_pos= nsnp_pos + 1 # COUNT MUTATIONS AT THIS CODON
@@ -674,8 +682,10 @@ cdef class SNPDataset:
                     d[0].dict[n].v=i
                     n= n+1
         dd=d[0].dict
-        if ntotal!=n:
-            raise IndexError('n!=ntotal  Debug!')
+        if ntotal < n:
+            raise IndexError('n > ntotal  Debug!')
+        elif ntotal > n:
+            print 'Some duplicate snp-sample entries were filtered.'
         qsort(dd,n,sizeof(CDictEntry),cdict_qsort_cmp) # SORT BY SAMPLE ID
         isample = -1
         n=0
